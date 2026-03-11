@@ -1,0 +1,26 @@
+
+# Ignore build outputs and binaries
+build/
+*.o
+*.out
+*.exe
+*.dylib
+*.a
+*.dSYM/
+
+# Ignore third-party headers/libs
+include/
+lib/
+
+# Ignore macOS system files
+.DS_Store
+
+# Ignore VS Code settings (optional)
+.vscode/
+
+# Allow only necessary files:
+# - src/
+# - CMakeLists.txt
+# - README.md
+# - Makefile
+# - .gitignore
