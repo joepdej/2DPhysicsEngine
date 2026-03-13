@@ -1,33 +1,63 @@
 #include "raylib-cpp.hpp"
+#include <vector>
+#include <cmath>
 
-const int screenWidth = 800;
-const int screenHeight = 600;
+const int screenWidth = 1200;
+const int screenHeight = 900;
 const int cellSize = 40;
 
 int currentFps = 60;
-float gravity = 500.0f; // pixels/s^2
-float spaceDensity = 0.001f;
 
-Vector2 position = { 400, 300 };
-Vector2 velocity = { 0, 0 };
+const float earthMass = 5.972e24f;      // kg
+const float moonMass = 7.35e22f;        // kg
+const float earthRadius = 6371e3f;      // m
+const float moonRadius = 1737e3f;       // m
+const float moonDistance = 384400e3f;   // m (average distance from Earth)
+const float G = 6.67430e-11f;           // m^3 kg^-1 s^-2
+const float timeStep = 3600.0f;
 
+const float scale = 1.0f / 1.0e6f;      // 1 pixel = 1,000,000 meters
 
+float gravity = G; 
 
-struct Object {
+class Object {
+    public:
     Vector2 position;
     Vector2 velocity;
+    float radius;
     float mass;
-    float dragCoefficient;
-    float projectedArea;
 
-    Object(Vector2 pos, Vector2 vel, float m) : position(pos), velocity(vel), mass(m) {
-        dragCoefficient = 0.47f; 
-        projectedArea = 3.14159f * 0.3f * 0.3f;
+    Object(Vector2 pos, Vector2 vel, float rad, float m) : position(pos), velocity(vel), radius(rad), mass(m) {}
+
+    void accelerate(float x, float y) {
+        this->velocity.x += x;
+        this->velocity.y += y;
     }
 
+    void update(){
+        this->position.x += this->velocity.x;
+        this->position.y += this->velocity.y;
+    }
+
+    float checkCollision(Object& other){
+        float dx = other.position.x - this->position.x;
+        float dy = other.position.y - this->position.y;
+        float distance = sqrt(dx * dx + dy * dy);
+        float minDist = this->radius + other.radius;
+
+        if (distance < minDist) {
+            float overlap = minDist - distance;
+            float separationX = dx / distance * overlap * 0.5f;
+            float separationY = dy / distance * overlap * 0.5f;
+            this->position.x -= separationX;
+            this->position.y -= separationY;
+            other.position.x += separationX;
+            other.position.y += separationY;
+            return 0.95f;
+        }
+        return 1.0f;
+    }
 };
-
-
 
 void DrawGrid2D() {
     for (int x = 0; x <= screenWidth; x += cellSize) {
@@ -38,74 +68,73 @@ void DrawGrid2D() {
     }
 }
 
+
+
+
 int main() {
     raylib::Window window(screenWidth, screenHeight, "2D Physics Engine");
     SetTargetFPS(currentFps);
-    Object ball(position, velocity, 1.0f);
 
-    bool dragging = false;
-    Vector2 dragOffset = {0.0f, 0.0f};
-    Vector2 lastMouse = {0.0f, 0.0f};
+    Vector2 earthPos = {screenWidth / 2.0f, screenHeight / 2.0f};
+    float earthDrawRadius = earthRadius * scale;
+
+    Vector2 moonPos = {
+        earthPos.x + moonDistance * scale,
+        earthPos.y
+    };
+    float moonDrawRadius = moonRadius * scale;
+
+    float orbitalVelocity = sqrt(G * earthMass / moonDistance);
+
+    std::vector<Object> objects = {
+        Object(earthPos, {0, 0}, earthDrawRadius, earthMass),
+        Object(moonPos, {0, -orbitalVelocity * scale}, moonDrawRadius, moonMass)
+    };
 
     while (!window.ShouldClose()) {
         BeginDrawing();
-            ClearBackground(RAYWHITE);
-            DrawGrid2D();
-            DrawCircleV(ball.position, 30, MAROON);
+            ClearBackground(BLACK);
 
-            Vector2 mouse = GetMousePosition();
-            bool mousePressed = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
-            bool mouseDown = IsMouseButtonDown(MOUSE_LEFT_BUTTON);
-            bool mouseReleased = IsMouseButtonReleased(MOUSE_LEFT_BUTTON);
+            for (auto& obj : objects) {
+                for (auto& obj2 : objects) {
+                    if(&obj2 == &obj ) continue;
+                    float directionX = obj2.position.x - obj.position.x;
+                    float directionY = obj2.position.y - obj.position.y;
+                    float distance = sqrt(directionX * directionX + directionY * directionY);
+                    if (distance < 1.0f) distance = 1.0f;
 
-            if (mousePressed && CheckCollisionPointCircle(mouse, ball.position, 30)) {
-                dragging = true;
-                dragOffset.x = mouse.x - ball.position.x;
-                dragOffset.y = mouse.y - ball.position.y;
-                lastMouse = mouse;
-                ball.velocity = {0.0f, 0.0f}; 
-            }
+                    float normX = directionX / distance;
+                    float normY = directionY / distance;
 
-            if (dragging && mouseDown) {
-                ball.position.x = mouse.x - dragOffset.x;
-                ball.position.y = mouse.y - dragOffset.y;
-            }
+                    float gravitationalForce = (gravity * obj.mass * obj2.mass) / (distance / scale * distance / scale);
+                    float acc1 = gravitationalForce / obj.mass;
+                    obj.accelerate(normX * acc1 * scale * timeStep, normY * acc1 * scale * timeStep);
 
-            if (dragging && mouseReleased) {
-                ball.velocity.x = (mouse.x - lastMouse.x) * currentFps * 0.02f;
-                ball.velocity.y = (mouse.y - lastMouse.y) * currentFps * 0.02f;
-                dragging = false;
-            }
-
-            lastMouse = mouse;
-
-            if (!dragging) {
-                // Calculate forces
-                // F_drag = 0.5 * ρ * v² * Cd * A
-                // F_drag_x = -F_drag * (vx / |v|)
-                // F_drag_y = -F_drag * (vy / |v|)
-                float speed2 = ball.velocity.x * ball.velocity.x + ball.velocity.y * ball.velocity.y;
-                float speed = sqrtf(speed2);
-                float dragForceMagnitude = 0.5f * spaceDensity * speed2 * ball.dragCoefficient * ball.projectedArea;
-                Vector2 dragForce = { 0.0f, 0.0f };
-                if (speed > 0.0f) {
-                    dragForce.x = -dragForceMagnitude * (ball.velocity.x / speed);
-                    dragForce.y = -dragForceMagnitude * (ball.velocity.y / speed);
+                    float damping = obj.checkCollision(obj2);
+                    obj.velocity.x *= damping;
+                    obj.velocity.y *= damping;
                 }
 
-                // F_gravity = m * g
-                Vector2 gravityForce = { 0.0f, ball.mass * gravity };
+                obj.position.x += obj.velocity.x * timeStep;
+                obj.position.y += obj.velocity.y * timeStep;
 
-                // a = F / m,  v += a * dt,  p += v * dt
-                float dt = 1.0f / currentFps;
-                ball.velocity.x += (dragForce.x / ball.mass) * dt;
-                ball.velocity.y += (dragForce.y / ball.mass + gravityForce.y / ball.mass) * dt;
-                ball.position.x += ball.velocity.x * dt;
-                ball.position.y += ball.velocity.y * dt;
+                DrawCircleV(obj.position, obj.radius, obj.mass == earthMass ? BLUE : WHITE);
 
-                if (ball.position.y > screenHeight - 30) {
-                    ball.position.y = screenHeight - 30;
-                    ball.velocity.y *= -0.8f;
+                if (obj.position.x - obj.radius < 0) {
+                    obj.position.x = obj.radius;
+                    obj.velocity.x *= -0.8f;
+                }
+                if (obj.position.x + obj.radius > screenWidth) {
+                    obj.position.x = screenWidth - obj.radius;
+                    obj.velocity.x *= -0.8f;
+                }
+                if (obj.position.y - obj.radius < 0) {
+                    obj.position.y = obj.radius;
+                    obj.velocity.y *= -0.8f;
+                }
+                if (obj.position.y + obj.radius > screenHeight) {
+                    obj.position.y = screenHeight - obj.radius;
+                    obj.velocity.y *= -0.8f;
                 }
             }
 
